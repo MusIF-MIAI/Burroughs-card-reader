@@ -10,31 +10,21 @@
 #define COLUMN_READ_DELAY_US 3400 //3400 was good
 
 #define COLUMNS 80
+#define CARD_CLOCKS 684
 
 #define BITMASK (0x00001BFF)
 
+#define START_COUNT 23
+#define COLUMN_READ_COUNT 8
 
 static repeating_timer_t sampler_tmr;
 static volatile unsigned int col_ctr = 0;
+#define MAX_CARDS 1000
 
-static uint16_t sample[COLUMNS];
-
-bool sampler_cb(repeating_timer_t *rt)
-{
-    sample[col_ctr++] = (uint16_t)(gpio_get_all() & BITMASK);
-    return (col_ctr < COLUMNS);
-}
-
-long long int sampler_start_cb(alarm_id_t id, void *user_data)
-{
-    (void)id;
-    (void)user_data;
-    col_ctr = 0;
-    sample[col_ctr++] = (uint16_t)(gpio_get_all() & BITMASK);
-    add_repeating_timer_us(COLUMN_READ_DELAY_US, sampler_cb, NULL, &sampler_tmr);
-    return 0;
-}
-
+static uint16_t sample[MAX_CARDS][COLUMNS];
+static uint32_t card_time[MAX_CARDS];
+static volatile int n_cards = 0;
+static volatile uint32_t jiffies = 0;
 
 bool card_inserted() {
     // Wait until all 12 pins go low (0) = blocking light (card inserted)
@@ -48,10 +38,25 @@ bool card_finished() {
     return pin_state == BITMASK;
 }
 
+static volatile unsigned int sample_clock_count = START_COUNT;
+
+// Interrupt handler function
+void clock_callback(uint gpio, uint32_t events) {
+    jiffies++;
+    if (col_ctr >= COLUMNS)
+        sample_clock_count = 0;
+    if (sample_clock_count == 0)
+        return;
+    if (--sample_clock_count == 0) {
+        sample[n_cards][col_ctr++] = (uint16_t)(gpio_get_all() & BITMASK);
+        sample_clock_count = COLUMN_READ_COUNT;
+    }
+}
+
 int main() {
-    unsigned int i, j;
+    unsigned int i, j, card;
     stdio_init_all();
-    sleep_ms(1000);
+    sleep_ms(1300);
 
     // Initialize GPIOs 0 through 11 as inputs
     for (i = 0; i < NUM_DATA_PINS; ++i) {
@@ -63,45 +68,66 @@ int main() {
     gpio_init(19);
     gpio_set_dir(18, GPIO_IN);
     gpio_set_dir(19, GPIO_IN);
-
+    gpio_pull_down(18);  // ensure low when no signal
+    gpio_pull_down(19);  // ensure low when no signal
 
     printf("Waiting for card...\n");
 
-
     while (1) {
+        char c;
         // Wait for card to be inserted (all pins 0)
-        while (!card_inserted())
-            ;
-        add_alarm_in_us(START_DELAY_US, sampler_start_cb, NULL, true);
+        while (!card_inserted()) {
+            c = getchar_timeout_us(0);
+            if (c == ' ') {
+                for (card = 0; card < n_cards; card++) {
+                    printf("Card n. %d\n", card);
+                    for (i = 0; i < COLUMNS; i++) {
+                        printf((sample[card][i] & (1u << 12u))?"*":"_");
+                    }
+                    printf("\n");
+                    for (i = 0; i < COLUMNS; i++) {
+                        printf((sample[card][i] & (1u << 11u))?"*":"_");
+                    }
+                    printf("\n");
+                    for (j = 0; j < 10; j++) {
+                        for (i = 0; i < COLUMNS; i++) {
+                            printf((sample[card][i] & (1u << j))?"*":"_");
+                        }
+                        printf("\n");
+                    }
+                    printf("\n\n");
+                }
+#if 0
+                for (card = 0; card < n_cards; card++) {
+                    printf("Card %d, time %lu delta %d\n", card, card_time[card], (card == 0)?card_time[card]:card_time[card] - card_time[card - 1]);
+                }
+#endif
+            }
+            if (c == 'a' || c == 'A') {
+                for (card = 0; card < n_cards; card++) {
+                    printf("Card n. %d\n", card);
+                    for (i = 0; i < COLUMNS; i++) {
+                        printf("%04X ", sample[card][i]);
+                    }
+                    printf("\n");
+                }
+                printf("\n\n");
+            }
+        }
+
+        sample_clock_count = START_COUNT;
+        gpio_set_irq_enabled_with_callback(18, GPIO_IRQ_EDGE_RISE, true, &clock_callback);
 
         /* Do nothing. Sampling happens in callbacks from timers */
-        while(col_ctr < COLUMNS)
-            sleep_ms(10);
 
-        cancel_repeating_timer(&sampler_tmr);
-        while(!card_finished())
+        while(gpio_get(19) == 0)
             ;
 
-#if 0
-        for (i = 0; i < COLUMNS; i++) {
-            printf("Col %d: %04X %0b\n", i, sample[i], sample[i]);
-        }
-#endif
-        for (i = 0; i < COLUMNS; i++) {
-            printf((sample[i] & (1u << 12u))?"*":"_");
-        }
-        printf("\n");
-        for (i = 0; i < COLUMNS; i++) {
-            printf((sample[i] & (1u << 11u))?"*":"_");
-        }
-        printf("\n");
-        for (j = 0; j < 10; j++) {
-            for (i = 0; i < COLUMNS; i++) {
-                printf((sample[i] & (1u << j))?"*":"_");
-            }
-            printf("\n");
-        }
-        printf("\n\n");
+        card_time[n_cards] = jiffies;
+        n_cards++;
+        jiffies = 0;
+        //gpio_set_irq_enabled(18, GPIO_IRQ_EDGE_RISE, false);
+
         col_ctr = 0;
     }
     return 0;
