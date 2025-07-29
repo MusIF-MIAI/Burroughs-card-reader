@@ -117,7 +117,7 @@ int main() {
                     }
                     printf("\n\n");
                 }
-                printf("Total cards: %d\n", n_cards + 1);
+                printf("Total cards: %d\n", n_cards);
                 printf("\n\n");
             }
             if (c == 'a' || c == 'A') {
@@ -128,7 +128,7 @@ int main() {
                     }
                     printf("\n");
                 }
-                printf("Total cards: %d\n", n_cards + 1);
+                printf("Total cards: %d\n", n_cards);
                 printf("\n\n");
             }
         }
