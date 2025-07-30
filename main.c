@@ -56,6 +56,9 @@ static volatile uint32_t feed_switch_last_change = 0;
 
 static void arch_reboot(void)
 {
+    multicore_reset_core1();
+    __dsb();
+
     AIRCR = AIRCR_SYSRESETREQ | AIRCR_VKEY;
     while(1)
         ;
@@ -78,28 +81,6 @@ void gpio_callback(uint gpio, uint32_t events)
             card_inserted = 0;
             jiffies = 0;
         }
-#if 0
-    } else if (gpio == GPIO_SWITCH_FEED) {
-        uint32_t now = get_absolute_time_ms();
-        if ((now - feed_switch_last_change) < SWITCH_FEED_DEBOUNCE)
-            return;
-        feed_switch_last_change = now;
-        if (events & GPIO_IRQ_EDGE_FALL) {
-            /* Feed off. */
-            gpio_put(GPIO_FEEDER, 0);
-            gpio_put(GPIO_LED_RED, 0);
-            pulse_on = 0;
-            feed_on = 0;
-            printf("FEED OFF\n");
-        } else if (events & GPIO_IRQ_EDGE_RISE) {
-            /* Feed on. */
-            feed_on = 1;
-            pulse_on = 1;
-            gpio_put(GPIO_FEEDER, 1);
-            gpio_put(GPIO_LED_RED, 1);
-            printf("FEED ON\n");
-        }
-#endif
     } else if (gpio == GPIO_ODOMETER) {
         jiffies++;
         if (!card_inserted)
@@ -197,7 +178,6 @@ int main() {
     gpio_set_irq_enabled_with_callback(GPIO_ODOMETER, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
     gpio_set_irq_enabled_with_callback(GPIO_CARD_DETECT, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
     gpio_set_irq_enabled_with_callback(GPIO_BUTTON_RESET, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
-    /* gpio_set_irq_enabled_with_callback(GPIO_SWITCH_FEED, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &gpio_callback); */
 
     multicore_launch_core1(core1_main);
     printf("System up and running.\n");
