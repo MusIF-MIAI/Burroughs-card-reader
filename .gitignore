@@ -1,0 +1,4 @@
+*.kicad_sch-bak
+*.lck
+kicad/burroughs/burroughs-backups/
+build/
